@@ -10,6 +10,9 @@
  *   cppcheck-suppress nullPointer
  */
 
+#ifndef strlcpy
+#define strlcpy(dst, src, sz) snprintf((dst), (sz), "%s", (src))
+#endif
 
 /* Create an empty queue */
 struct list_head *q_new()
@@ -29,6 +32,26 @@ void q_free(struct list_head *l) {}
 /* Insert an element at head of queue */
 bool q_insert_head(struct list_head *head, char *s)
 {
+    if (!head) {
+        return false;
+    }
+    element_t *inserted_element = (element_t *) malloc(sizeof(element_t));
+    if (!inserted_element) {
+        return false;
+    }
+    if (s) {
+        inserted_element->value = (char *) malloc(strlen(s) + 1);
+        if (!inserted_element->value) {
+            free(inserted_element);
+            return false;
+        }
+        strlcpy(inserted_element->value, s, strlen(s) + 1);
+    }
+    struct list_head *next = head->next;
+    inserted_element->list.next = next;
+    inserted_element->list.prev = head;
+    head->next = &inserted_element->list;
+    next->prev = &inserted_element->list;
     return true;
 }
 
