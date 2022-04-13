@@ -128,7 +128,22 @@ void q_swap(struct list_head *head)
 }
 
 /* Reverse elements in queue */
-void q_reverse(struct list_head *head) {}
+void q_reverse(struct list_head *head)
+{
+    if (!q_size(head)) {
+        return;
+    }
+
+    struct list_head *node, *tmp;
+    for (node = head->next; node != head; node = node->prev) {
+        tmp = node->next;
+        node->next = node->prev;
+        node->prev = tmp;
+    }
+    tmp = head->next;
+    head->next = head->prev;
+    head->prev = tmp;
+}
 
 /* Sort elements of queue in ascending order */
 void q_sort(struct list_head *head) {}
