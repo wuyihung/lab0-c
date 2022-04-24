@@ -120,7 +120,21 @@ element_t *q_remove_head(struct list_head *head, char *sp, size_t bufsize)
 /* Remove an element from tail of queue */
 element_t *q_remove_tail(struct list_head *head, char *sp, size_t bufsize)
 {
-    return NULL;
+    if (!q_size(head)) {
+        return NULL;
+    }
+    struct list_head *removed = head->prev;
+    struct list_head *prev = removed->prev;
+    head->prev = prev;
+    prev->next = head;
+    element_t *removed_element = list_entry(removed, element_t, list);
+    if (sp) {
+        size_t legal_bufsize = bufsize > strlen(removed_element->value) + 1
+                                   ? strlen(removed_element->value) + 1
+                                   : bufsize;
+        strlcpy(sp, removed_element->value, legal_bufsize);
+    }
+    return removed_element;
 }
 
 /* Return number of elements in queue */
