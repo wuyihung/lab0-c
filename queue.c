@@ -100,7 +100,7 @@ bool q_insert_tail(struct list_head *head, char *s)
 /* Remove an element from head of queue */
 element_t *q_remove_head(struct list_head *head, char *sp, size_t bufsize)
 {
-    if (!q_size(head)) {
+    if (!head || list_empty(head)) {
         return NULL;
     }
     struct list_head *removed = head->next;
@@ -120,7 +120,7 @@ element_t *q_remove_head(struct list_head *head, char *sp, size_t bufsize)
 /* Remove an element from tail of queue */
 element_t *q_remove_tail(struct list_head *head, char *sp, size_t bufsize)
 {
-    if (!q_size(head)) {
+    if (!head || list_empty(head)) {
         return NULL;
     }
     struct list_head *removed = head->prev;
@@ -154,7 +154,7 @@ int q_size(struct list_head *head)
 /* Delete the middle node in queue */
 bool q_delete_mid(struct list_head *head)
 {
-    if (!q_size(head)) {
+    if (!head || list_empty(head)) {
         return false;
     }
     struct list_head **indirect = &head->next;
@@ -173,7 +173,7 @@ bool q_delete_mid(struct list_head *head)
 /* Delete all nodes that have duplicate string */
 bool q_delete_dup(struct list_head *head)
 {
-    if (q_size(head) < 2) {
+    if (!head) {
         return false;
     }
 
@@ -202,7 +202,7 @@ bool q_delete_dup(struct list_head *head)
 /* Swap every two adjacent nodes */
 void q_swap(struct list_head *head)
 {
-    if (q_size(head) < 2) {
+    if (!head || list_empty(head)) {
         return;
     }
     struct list_head *prev, *next, *next_next;
@@ -223,7 +223,7 @@ void q_swap(struct list_head *head)
 /* Reverse elements in queue */
 void q_reverse(struct list_head *head)
 {
-    if (!q_size(head)) {
+    if (!head || list_empty(head)) {
         return;
     }
 
@@ -288,7 +288,7 @@ struct list_head *sort_recur(struct list_head *head)
 /* Sort elements of queue in ascending order */
 void q_sort(struct list_head *head)
 {
-    if (q_size(head) < 2) {
+    if (!head || list_empty(head)) {
         return;
     }
 
