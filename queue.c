@@ -238,70 +238,117 @@ void q_reverse(struct list_head *head)
     head->prev = tmp;
 }
 
-struct list_head *merge_two_lists(struct list_head *head1,
-                                  struct list_head *head2)
+static struct list_head *merge(struct list_head *a, struct list_head *b)
 {
-    struct list_head *node1 = head1, *node2 = head2;
-    struct list_head *head;
-    struct list_head **node = &head;
-    struct list_head **node_prev = &head;
-    struct list_head *tail1 = head1 ? head1->prev : NULL;
-    struct list_head *tail2 = head2 ? head2->prev : NULL;
-    while (node1 && node2) {
-        element_t *element1 = list_entry(node1, element_t, list);
-        element_t *element2 = list_entry(node2, element_t, list);
-        struct list_head **old_node =
-            strcmp(element1->value, element2->value) <= 0 ? &node1 : &node2;
-        *node = *old_node;
-        (*node)->prev = *node_prev;
-        *old_node = (*old_node)->next;
-        node_prev = node;
-        node = &(*node)->next;
+    struct list_head *head = NULL, **tail = &head;
+
+    for (;;) {
+        element_t *a_entry = list_entry(a, element_t, list);
+        element_t *b_entry = list_entry(b, element_t, list);
+        if (strcmp(a_entry->value, b_entry->value) <= 0) {
+            *tail = a;
+            tail = &a->next;
+            a = a->next;
+            if (!a) {
+                *tail = b;
+                break;
+            }
+        } else {
+            *tail = b;
+            tail = &b->next;
+            b = b->next;
+            if (!b) {
+                *tail = a;
+                break;
+            }
+        }
     }
-    *node = node1 ? node1 : node2;
-    (*node)->prev = *node_prev;
-    head->prev = node1 ? tail1 : tail2;
     return head;
 }
 
-struct list_head *sort_recur(struct list_head *head)
+static void merge_final(struct list_head *head,
+                        struct list_head *a,
+                        struct list_head *b)
 {
-    if (!head->next) {
-        return head;
+    struct list_head *tail = head;
+
+    for (;;) {
+        element_t *a_entry = list_entry(a, element_t, list);
+        element_t *b_entry = list_entry(b, element_t, list);
+        if (strcmp(a_entry->value, b_entry->value) <= 0) {
+            tail->next = a;
+            a->prev = tail;
+            tail = a;
+            a = a->next;
+            if (!a)
+                break;
+        } else {
+            tail->next = b;
+            b->prev = tail;
+            tail = b;
+            b = b->next;
+            if (!b) {
+                b = a;
+                break;
+            }
+        }
     }
 
-    struct list_head *slow = head;
-    for (struct list_head *fast = slow; fast && fast->next;
-         fast = fast->next->next) {
-        slow = slow->next;
-    }
-    struct list_head *mid = slow;
-    struct list_head *left_tail = mid->prev;
-    struct list_head *right_tail = head->prev;
-    left_tail->next = NULL;
-    head->prev = left_tail;
-    mid->prev = right_tail;
-    struct list_head *left = sort_recur(head), *right = sort_recur(mid);
-    return merge_two_lists(left, right);
+    tail->next = b;
+    do {
+        b->prev = tail;
+        tail = b;
+        b = b->next;
+    } while (b);
+
+    tail->next = head;
+    head->prev = tail;
 }
 
 /* Sort elements of queue in ascending order */
 void q_sort(struct list_head *head)
 {
-    if (!head || list_empty(head)) {
+    if (!head)
         return;
+
+    struct list_head *list = head->next, *pending = NULL;
+    size_t count = 0;
+
+    if (list == head->prev)
+        return;
+
+    head->prev->next = NULL;
+
+    do {
+        size_t bits;
+        struct list_head **tail = &pending;
+
+        for (bits = count; bits & 1; bits >>= 1)
+            tail = &(*tail)->prev;
+
+        if (bits) {
+            struct list_head *a = *tail, *b = a->prev;
+            a = merge(b, a);
+            a->prev = b->prev;
+            *tail = a;
+        }
+
+        list->prev = pending;
+        pending = list;
+        list = list->next;
+        pending->next = NULL;
+        count++;
+    } while (list);
+
+    list = pending;
+    pending = pending->prev;
+    for (;;) {
+        struct list_head *next = pending->prev;
+
+        if (!next)
+            break;
+        list = merge(pending, list);
+        pending = next;
     }
-
-    struct list_head *modified_list = head->next;
-    struct list_head *tail = head->prev;
-    modified_list->prev = tail;
-    tail->next = NULL;
-
-    modified_list = sort_recur(modified_list);
-
-    head->next = modified_list;
-    tail = modified_list->prev;
-    modified_list->prev = head;
-    head->prev = tail;
-    tail->next = head;
+    merge_final(head, pending, list);
 }
