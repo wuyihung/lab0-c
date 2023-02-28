@@ -241,12 +241,23 @@ void q_reverse(struct list_head *head)
 struct list_head *merge_two_lists(struct list_head *head1,
                                   struct list_head *head2)
 {
+    if (!head1 && !head2) {
+        return NULL;
+    }
+
     struct list_head *node1 = head1, *node2 = head2;
-    struct list_head *head;
+    struct list_head *head = NULL;
     struct list_head **node = &head;
     struct list_head **node_prev = &head;
-    struct list_head *tail1 = head1 ? head1->prev : NULL;
-    struct list_head *tail2 = head2 ? head2->prev : NULL;
+    struct list_head *tail1 = NULL;
+    if (head1) {
+        tail1 = head1->prev;
+    }
+    struct list_head *tail2 = NULL;
+    if (head2) {
+        tail2 = head2->prev;
+    }
+
     while (node1 && node2) {
         element_t *element1 = list_entry(node1, element_t, list);
         element_t *element2 = list_entry(node2, element_t, list);
@@ -285,6 +296,12 @@ struct list_head *sort_recur(struct list_head *head)
     return merge_two_lists(left, right);
 }
 
+/* Reverse the nodes of the list k at a time */
+void q_reverseK(struct list_head *head, int k)
+{
+    // https://leetcode.com/problems/reverse-nodes-in-k-group/
+}
+
 /* Sort elements of queue in ascending order */
 void q_sort(struct list_head *head)
 {
@@ -304,4 +321,19 @@ void q_sort(struct list_head *head)
     modified_list->prev = head;
     head->prev = tail;
     tail->next = head;
+}
+
+/* Remove every node which has a node with a strictly greater value anywhere to
+ * the right side of it */
+int q_descend(struct list_head *head)
+{
+    // https://leetcode.com/problems/remove-nodes-from-linked-list/
+    return 0;
+}
+
+/* Merge all the queues into one sorted queue, which is in ascending order */
+int q_merge(struct list_head *head)
+{
+    // https://leetcode.com/problems/merge-k-sorted-lists/
+    return 0;
 }
