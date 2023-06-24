@@ -31,25 +31,22 @@ $ sudo pacman -S aspell-en
 
 Note: [Cppcheck](http://cppcheck.sourceforge.net/) version must be at least 1.90, otherwise
 it might report errors with false positives. You can get its version by executing `$ cppcheck --version`.
-Check [Developer Info](http://cppcheck.sourceforge.net/devinfo/) for building Cppcheck from source. Alternatively,
-you can make use of [snap](https://snapcraft.io/) for latest Cppcheck:
-```shell
-$ sudo snap install cppcheck
-$ export PATH=/snap/bin:$PATH
-```
+Check [Developer Info](http://cppcheck.sourceforge.net/devinfo/) for building Cppcheck from source.
 
-## Integrate `clang-format` to `vim`
+### Integrate `clang-format` to `vim`
 If you want to run `clang-format` automatically after saving with vim, 
-clang-format supports integration for vim according to [Clang 11 documentation](https://clang.llvm.org/docs/ClangFormat.html). 
+clang-format supports integration for vim according to [Clang documentation](https://clang.llvm.org/docs/ClangFormat.html).
 
 By adding the following into `$HOME/.vimrc`
 ```shell
 function! Formatonsave()
   let l:formatdiff = 1
-  py3f <path to your clang-format.py>/clang-format.py
+  py3f <path-to-clang-format.py>/clang-format.py
 endfunction
 autocmd BufWritePre *.h,*.hpp,*.c,*.cc,*.cpp call Formatonsave()
 ```
+
+Then, it has zero-effort integration into the coding workflow since it can handle formatting changes while saving a file.
 Note: on Ubuntu Linux 18.04, the path to `clang-format.py` is `/usr/share/vim/addons/syntax/`.  
 
 ## Running the autograders
@@ -89,32 +86,32 @@ Extra options can be recognized by make:
 Run `$ ./qtest -h` to see the list of command-line options
 
 When you execute `$ ./qtest`, it will give a command prompt `cmd> `.  Type
-"help" to see a list of available commands.
+`help` to see a list of available commands.
 
 ## Files
 
 You will handing in these two files
-* queue.h : Modified version of declarations including new fields you want to introduce
-* queue.c : Modified version of queue code to fix deficiencies of original code
+* `queue.h` : Modified version of declarations including new fields you want to introduce
+* `queue.c` : Modified version of queue code to fix deficiencies of original code
 
 Tools for evaluating your queue code
-* Makefile : Builds the evaluation program `qtest`
-* README.md : This file
-* scripts/driver.py : The driver program, runs `qtest` on a standard set of traces
-* scripts/debug.py : The helper program for GDB, executes qtest without SIGALRM and/or analyzes generated core dump file.
+* `Makefile` : Builds the evaluation program `qtest`
+* `README.md` : This file
+* `scripts/driver.py` : The driver program, runs `qtest` on a standard set of traces
+* `scripts/debug.py` : The helper program for GDB, executes `qtest` without SIGALRM and/or analyzes generated core dump file.
 
 Helper files
-* console.{c,h} : Implements command-line interpreter for qtest
-* report.{c,h} : Implements printing of information at different levels of verbosity
-* harness.{c,h} : Customized version of malloc/free/strdup to provide rigorous testing framework
-* qtest.c : Code for `qtest`
+* `console.{c,h}` : Implements command-line interpreter for qtest
+* `report.{c,h}` : Implements printing of information at different levels of verbosity
+* `harness.{c,h}` : Customized version of malloc/free/strdup to provide rigorous testing framework
+* `qtest.c` : Code for `qtest`
 
 Trace files
-* traces/trace-XX-CAT.cmd : Trace files used by the driver.  These are input files for `qtest`.
+* `traces/trace-XX-CAT.cmd` : Trace files used by the driver.  These are input files for `qtest`.
   * They are short and simple.
   * We encourage to study them to see what tests are being performed.
   * XX is the trace number (1-17).  CAT describes the general nature of the test.
-* traces/trace-eg.cmd : A simple, documented trace file to demonstrate the operation of `qtest`
+* `traces/trace-eg.cmd` : A simple, documented trace file to demonstrate the operation of `qtest`
 
 ## Debugging Facilities
 
@@ -161,9 +158,30 @@ cmd>
 
 ## User-friendly command line
 [linenoise](https://github.com/antirez/linenoise) was integrated into `qtest`, providing the following user-friendly features:
-* Move cursor by right and left key
+* Move cursor by Left and Right key
+* Jump the cursor over words by Ctrl-Left and Ctrl-Right key
 * Get previous or next command typed before by up and down key
 * Auto completion by TAB
+
+## Built-in web server
+
+A small web server is already integrated within the `qtest` command line interpreter,
+and you may use it by running the `web` command in its prompt.
+```
+$ ./qtest
+cmd> web
+listen on port 9999, fd is 3
+```
+
+Run the following commands in another terminal after the built-in web server is ready.
+```shell
+$ curl http://localhost:9999/new
+$ curl http://localhost:9999/ih/1
+$ curl http://localhost:9999/ih/2
+$ curl http://localhost:9999/ih/3
+$ curl http://localhost:9999/sort
+$ curl http://localhost:9999/quit
+```
 
 ## License
 
@@ -174,3 +192,5 @@ External source code:
 * [dudect](https://github.com/oreparaz/dudect): public domain
 * [git-good-commit](https://github.com/tommarshall/git-good-commit): MIT License
 * [linenoise](https://github.com/antirez/linenoise): BSD 2-Clause "Simplified" License
+* [tiny-web-server](https://github.com/7890/tiny-web-server): MIT License
+* [randombytes](https://github.com/dsprenkels/randombytes): MIT License

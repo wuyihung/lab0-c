@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+
 #include "harness.h"
 #include "list.h"
 
@@ -23,6 +24,20 @@ typedef struct {
     char *value;
     struct list_head list;
 } element_t;
+
+/**
+ * queue_contex_t - The context managing a chain of queues
+ * @q: pointer to the head of the queue
+ * @chain: used by chaining the heads of queues
+ * @size: the length of this queue
+ * @id: the unique identification number
+ */
+typedef struct {
+    struct list_head *q;
+    struct list_head chain;
+    int size;
+    int id;
+} queue_contex_t;
 
 /* Operations on queue */
 
@@ -119,7 +134,7 @@ int q_size(struct list_head *head);
  *
  * The middle node of a linked list of size n is the
  * ⌊n / 2⌋th node from the start using 0-based indexing.
- * If there're six element, the third member should be return.
+ * If there're six elements, the third member should be returned.
  *
  * Reference:
  * https://leetcode.com/problems/delete-the-middle-node-of-a-linked-list/
@@ -141,7 +156,7 @@ bool q_delete_mid(struct list_head *head);
 bool q_delete_dup(struct list_head *head);
 
 /**
- * q_delete_dup() - Swap every two adjacent nodes
+ * q_swap() - Swap every two adjacent nodes
  * @head: header of queue
  *
  * Reference:
@@ -161,6 +176,21 @@ void q_swap(struct list_head *head);
 void q_reverse(struct list_head *head);
 
 /**
+ * q_reverseK() - Given the head of a linked list, reverse the nodes of the list
+ * k at a time.
+ * @head: header of queue
+ * @k: is a positive integer and is less than or equal to the length of the
+ * linked list.
+ *
+ * No effect if queue is NULL or empty. If there has only one element, do
+ * nothing.
+ *
+ * Reference:
+ * https://leetcode.com/problems/reverse-nodes-in-k-group/
+ */
+void q_reverseK(struct list_head *head, int k);
+
+/**
  * q_sort() - Sort elements of queue in ascending order
  * @head: header of queue
  *
@@ -168,5 +198,39 @@ void q_reverse(struct list_head *head);
  * nothing.
  */
 void q_sort(struct list_head *head);
+
+/**
+ * q_descend() - Remove every node which has a node with a strictly greater
+ * value anywhere to the right side of it.
+ * @head: header of queue
+ *
+ * No effect if queue is NULL or empty. If there has only one element, do
+ * nothing.
+ *
+ * Reference:
+ * https://leetcode.com/problems/remove-nodes-from-linked-list/
+ *
+ * Return: the number of elements in queue after performing operation
+ */
+int q_descend(struct list_head *head);
+
+/**
+ * q_merge() - Merge all the queues into one sorted queue, which is in ascending
+ * order.
+ * @head: header of chain
+ *
+ * This function merge the second to the last queues in the chain into the first
+ * queue. The queues are guaranteed to be sorted before this function is called.
+ * No effect if there is only one queue in the chain. Allocation is disallowed
+ * in this function. There is no need to free the 'qcontext_t' and its member
+ * 'q' since they will be released externally. However, q_merge() is responsible
+ * for making the queues to be NULL-queue, except the first one.
+ *
+ * Reference:
+ * https://leetcode.com/problems/merge-k-sorted-lists/
+ *
+ * Return: the number of elements in queue after merging
+ */
+int q_merge(struct list_head *head);
 
 #endif /* LAB0_QUEUE_H */

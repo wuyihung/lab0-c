@@ -305,6 +305,12 @@ static void merge_final(struct list_head *head,
     head->prev = tail;
 }
 
+/* Reverse the nodes of the list k at a time */
+void q_reverseK(struct list_head *head, int k)
+{
+    // https://leetcode.com/problems/reverse-nodes-in-k-group/
+}
+
 /* Sort elements of queue in ascending order */
 void q_sort(struct list_head *head)
 {
@@ -351,4 +357,19 @@ void q_sort(struct list_head *head)
         pending = next;
     }
     merge_final(head, pending, list);
+}
+
+/* Remove every node which has a node with a strictly greater value anywhere to
+ * the right side of it */
+int q_descend(struct list_head *head)
+{
+    // https://leetcode.com/problems/remove-nodes-from-linked-list/
+    return 0;
+}
+
+/* Merge all the queues into one sorted queue, which is in ascending order */
+int q_merge(struct list_head *head)
+{
+    // https://leetcode.com/problems/merge-k-sorted-lists/
+    return 0;
 }

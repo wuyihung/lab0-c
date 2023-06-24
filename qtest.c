@@ -1,5 +1,6 @@
 /* Implementation of testing code for queue code */
 
+#include <assert.h>
 #include <errno.h>
 #include <getopt.h>
 #include <signal.h>
@@ -10,10 +11,21 @@
 #include <strings.h> /* strcasecmp */
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
+
+#if defined(__APPLE__)
+#include <mach/mach_time.h>
+#else /* Assume POSIX environments */
+#include <time.h>
+#endif
+
 #include "dudect/fixture.h"
 #include "list.h"
+#include "random.h"
+
+/* Shannon entropy */
+extern double shannon_entropy(const uint8_t *input_data);
+extern int show_entropy;
 
 /* Our program needs to use regular malloc/free */
 #define INTERNAL 1
@@ -43,25 +55,20 @@
  * This affects how it gets printed
  * and whether cautious mode is used when freeing the queue
  */
-#define BIG_LIST 30
-static int big_list_size = BIG_LIST;
+#define BIG_LIST_SIZE 30
 
 /* Global variables */
 
-/* List being tested */
 typedef struct {
-    struct list_head *l;
-    /* meta data of list */
+    struct list_head head;
     int size;
-} list_head_meta_t;
+} queue_chain_t;
 
-static list_head_meta_t l_meta;
-
-/* Number of elements in queue */
-static size_t lcnt = 0;
+static queue_chain_t chain = {.size = 0};
+static queue_contex_t *current = NULL;
 
 /* How many times can queue operations fail */
-static int fail_limit = BIG_LIST;
+static int fail_limit = BIG_LIST_SIZE;
 static int fail_count = 0;
 
 static int string_length = MAXSTRING;
@@ -69,9 +76,13 @@ static int string_length = MAXSTRING;
 #define MIN_RANDSTR_LEN 5
 #define MAX_RANDSTR_LEN 10
 static const char charset[] = "abcdefghijklmnopqrstuvwxyz";
-
+/* For queue_insert and queue_remove */
+typedef enum {
+    POS_TAIL,
+    POS_HEAD,
+} position_t;
 /* Forward declarations */
-static bool show_queue(int vlevel);
+static bool q_show(int vlevel);
 
 static bool do_free(int argc, char *argv[])
 {
@@ -81,25 +92,44 @@ static bool do_free(int argc, char *argv[])
     }
 
     bool ok = true;
-    if (!l_meta.l)
-        report(3, "Warning: Calling free on null queue");
+    if (!chain.size || !current || !current->q) {
+        report(3,
+               "Warning: There is no available queue or calling free on null "
+               "queue");
+    }
     error_check();
 
-    if (lcnt > big_list_size)
+    if (current && current->size > BIG_LIST_SIZE)
         set_cautious_mode(false);
-    if (exception_setup(true))
-        q_free(l_meta.l);
-    exception_cancel();
-    set_cautious_mode(true);
 
-    l_meta.size = 0;
-    l_meta.l = NULL;
-    lcnt = 0;
-    show_queue(3);
+    struct list_head *qnext = NULL;
+    if (chain.size > 1) {
+        qnext = ((uintptr_t) current->chain.next == (uintptr_t) &chain.head)
+                    ? chain.head.next
+                    : current->chain.next;
+    }
+
+    if (current) {
+        list_del(&current->chain);
+
+        if (exception_setup(true))
+            q_free(current->q);
+        exception_cancel();
+        set_cautious_mode(true);
+    }
+
+    if (current) {
+        free(current);
+        chain.size--;
+        current = qnext ? list_entry(qnext, queue_contex_t, chain) : NULL;
+    }
+
+    q_show(3);
 
     size_t bcnt = allocation_check();
-    if (bcnt > 0) {
-        report(1, "ERROR: Freed queue, but %lu blocks are still allocated",
+    if (!chain.size && bcnt > 0) {
+        report(1,
+               "ERROR: There is no queue, but %lu blocks are still allocated",
                bcnt);
         ok = false;
     }
@@ -115,19 +145,19 @@ static bool do_new(int argc, char *argv[])
     }
 
     bool ok = true;
-    if (l_meta.l) {
-        report(3, "Freeing old queue");
-        ok = do_free(argc, argv);
-    }
-    error_check();
 
     if (exception_setup(true)) {
-        l_meta.l = q_new();
-        l_meta.size = 0;
+        queue_contex_t *qctx = malloc(sizeof(queue_contex_t));
+        list_add_tail(&qctx->chain, &chain.head);
+
+        qctx->size = 0;
+        qctx->q = q_new();
+        qctx->id = chain.size++;
+
+        current = qctx;
     }
     exception_cancel();
-    lcnt = 0;
-    show_queue(3);
+    q_show(3);
 
     return ok && !error_check();
 }
@@ -141,22 +171,25 @@ static void fill_rand_string(char *buf, size_t buf_size)
     while (len < MIN_RANDSTR_LEN)
         len = rand() % buf_size;
 
+    randombytes((uint8_t *) buf, len);
     for (size_t n = 0; n < len; n++)
-        buf[n] = charset[rand() % (sizeof charset - 1)];
+        buf[n] = charset[buf[n] % (sizeof(charset) - 1)];
     buf[len] = '\0';
 }
 
-/* insert head */
-static bool do_ih(int argc, char *argv[])
+/* insertion */
+static bool queue_insert(position_t pos, int argc, char *argv[])
 {
     if (simulation) {
         if (argc != 1) {
             report(1, "%s does not need arguments in simulation mode", argv[0]);
             return false;
         }
-        bool ok = is_insert_head_const();
+        bool ok =
+            pos == POS_TAIL ? is_insert_tail_const() : is_insert_head_const();
         if (!ok) {
-            report(1, "ERROR: Probably not constant time");
+            report(1,
+                   "ERROR: Probably not constant time or wrong implementation");
             return false;
         }
         report(1, "Probably constant time");
@@ -185,20 +218,24 @@ static bool do_ih(int argc, char *argv[])
         inserts = randstr_buf;
     }
 
-    if (!l_meta.l)
-        report(3, "Warning: Calling insert head on null queue");
+    if (!current || !current->q)
+        report(3, "Warning: Calling insert %s on null queue",
+               pos == POS_TAIL ? "tail" : "head");
     error_check();
 
-    if (exception_setup(true)) {
+    if (current && exception_setup(true)) {
         for (int r = 0; ok && r < reps; r++) {
             if (need_rand)
                 fill_rand_string(randstr_buf, sizeof(randstr_buf));
-            bool rval = q_insert_head(l_meta.l, inserts);
+            bool rval = pos == POS_TAIL ? q_insert_tail(current->q, inserts)
+                                        : q_insert_head(current->q, inserts);
             if (rval) {
-                lcnt++;
-                l_meta.size++;
-                char *cur_inserts =
-                    list_entry(l_meta.l->next, element_t, list)->value;
+                current->size++;
+                element_t *entry =
+                    pos == POS_TAIL
+                        ? list_last_entry(current->q, element_t, list)
+                        : list_first_entry(current->q, element_t, list);
+                char *cur_inserts = entry->value;
                 if (!cur_inserts) {
                     report(1, "ERROR: Failed to save copy of string in queue");
                     ok = false;
@@ -232,102 +269,39 @@ static bool do_ih(int argc, char *argv[])
     }
     exception_cancel();
 
-    show_queue(3);
+    q_show(3);
     return ok;
+}
+
+/* insert head */
+static bool do_ih(int argc, char *argv[])
+{
+    return queue_insert(POS_HEAD, argc, argv);
 }
 
 /* insert tail */
 static bool do_it(int argc, char *argv[])
 {
-    if (simulation) {
-        if (argc != 1) {
-            report(1, "%s does not need arguments in simulation mode", argv[0]);
-            return false;
-        }
-        bool ok = is_insert_tail_const();
-        if (!ok) {
-            report(1, "ERROR: Probably not constant time");
-            return false;
-        }
-        report(1, "Probably constant time");
-        return ok;
-    }
-
-    char randstr_buf[MAX_RANDSTR_LEN];
-    int reps = 1;
-    bool ok = true, need_rand = false;
-    if (argc != 2 && argc != 3) {
-        report(1, "%s needs 1-2 arguments", argv[0]);
-        return false;
-    }
-
-    char *inserts = argv[1];
-    if (argc == 3) {
-        if (!get_int(argv[2], &reps)) {
-            report(1, "Invalid number of insertions '%s'", argv[2]);
-            return false;
-        }
-    }
-
-    if (!strcmp(inserts, "RAND")) {
-        need_rand = true;
-        inserts = randstr_buf;
-    }
-
-    if (!l_meta.l)
-        report(3, "Warning: Calling insert tail on null queue");
-    error_check();
-
-    if (exception_setup(true)) {
-        for (int r = 0; ok && r < reps; r++) {
-            if (need_rand)
-                fill_rand_string(randstr_buf, sizeof(randstr_buf));
-            bool rval = q_insert_tail(l_meta.l, inserts);
-            if (rval) {
-                lcnt++;
-                l_meta.size++;
-                char *cur_inserts =
-                    list_entry(l_meta.l->prev, element_t, list)->value;
-                if (!cur_inserts) {
-                    report(1, "ERROR: Failed to save copy of string in queue");
-                    ok = false;
-                }
-            } else {
-                fail_count++;
-                if (fail_count < fail_limit)
-                    report(2, "Insertion of %s failed", inserts);
-                else {
-                    report(1,
-                           "ERROR: Insertion of %s failed (%d failures total)",
-                           inserts, fail_count);
-                    ok = false;
-                }
-            }
-            ok = ok && !error_check();
-        }
-    }
-    exception_cancel();
-    show_queue(3);
-    return ok;
+    return queue_insert(POS_TAIL, argc, argv);
 }
 
-static bool do_remove(int option, int argc, char *argv[])
+static bool queue_remove(position_t pos, int argc, char *argv[])
 {
-    // option 0 is for remove head; option 1 is for remove tail
-
     /* FIXME: It is known that both functions is_remove_tail_const() and
-     * is_remove_head_const() can not pass dudect on Arm64. We shall figure
-     * out the exact reasons and resolve later.
+     * is_remove_head_const() can not pass dudect on Apple M1 (based on Arm64).
+     * We shall figure out the exact reasons and resolve later.
      */
-#if !defined(__aarch64__)
+#if !(defined(__aarch64__) && defined(__APPLE__))
     if (simulation) {
         if (argc != 1) {
             report(1, "%s does not need arguments in simulation mode", argv[0]);
             return false;
         }
-        bool ok = option ? is_remove_tail_const() : is_remove_head_const();
+        bool ok =
+            pos == POS_TAIL ? is_remove_tail_const() : is_remove_head_const();
         if (!ok) {
-            report(1, "ERROR: Probably not constant time");
+            report(1,
+                   "ERROR: Probably not constant time or wrong implementation");
             return false;
         }
         report(1, "Probably constant time");
@@ -366,14 +340,16 @@ static bool do_remove(int option, int argc, char *argv[])
     memset(removes + 1, 'X', string_length + STRINGPAD - 1);
     removes[string_length + STRINGPAD] = '\0';
 
-    if (!l_meta.size)
-        report(3, "Warning: Calling remove head on empty queue");
+    if (!current || !current->size)
+        report(3, "Warning: Calling remove %s on empty queue",
+               pos == POS_TAIL ? "tail" : "head");
     error_check();
 
     element_t *re = NULL;
-    if (exception_setup(true))
-        re = option ? q_remove_tail(l_meta.l, removes, string_length + 1)
-                    : q_remove_head(l_meta.l, removes, string_length + 1);
+    if (current && exception_setup(true))
+        re = pos == POS_TAIL
+                 ? q_remove_tail(current->q, removes, string_length + 1)
+                 : q_remove_head(current->q, removes, string_length + 1);
     exception_cancel();
 
     bool is_null = re ? false : true;
@@ -403,8 +379,7 @@ static bool do_remove(int option, int argc, char *argv[])
         } else {
             report(2, "Removed %s from queue", removes);
         }
-        lcnt--;
-        l_meta.size--;
+        current->size--;
     } else {
         fail_count++;
         if (!check && fail_count < fail_limit) {
@@ -422,7 +397,7 @@ static bool do_remove(int option, int argc, char *argv[])
         ok = false;
     }
 
-    show_queue(3);
+    q_show(3);
 
     free(removes);
     free(checks);
@@ -431,53 +406,12 @@ static bool do_remove(int option, int argc, char *argv[])
 
 static inline bool do_rh(int argc, char *argv[])
 {
-    return do_remove(0, argc, argv);
+    return queue_remove(POS_HEAD, argc, argv);
 }
 
 static inline bool do_rt(int argc, char *argv[])
 {
-    return do_remove(1, argc, argv);
-}
-
-/* remove head quietly */
-static bool do_rhq(int argc, char *argv[])
-{
-    if (argc != 1) {
-        report(1, "%s takes no arguments", argv[0]);
-        return false;
-    }
-
-    bool ok = true;
-    if (!l_meta.size)
-        report(3, "Warning: Calling remove head on empty queue");
-    error_check();
-
-    element_t *re = NULL;
-
-    if (exception_setup(true))
-        re = q_remove_head(l_meta.l, NULL, 0);
-    exception_cancel();
-
-    if (re) {
-        // q_remove_head and q_remove_tail are not responsible for releasing
-        // node
-        q_release_element(re);
-
-        report(2, "Removed element from queue");
-        lcnt--;
-        l_meta.size--;
-    } else {
-        fail_count++;
-        if (fail_count < fail_limit)
-            report(2, "Removal failed");
-        else {
-            report(1, "ERROR: Removal failed (%d failures total)", fail_count);
-            ok = false;
-        }
-    }
-
-    show_queue(3);
-    return ok && !error_check();
+    return queue_remove(POS_TAIL, argc, argv);
 }
 
 static bool do_dedup(int argc, char *argv[])
@@ -487,12 +421,17 @@ static bool do_dedup(int argc, char *argv[])
         return false;
     }
 
+    if (!current || !current->q) {
+        report(3, "Warning: Try to access null queue");
+        return false;
+    }
+
     LIST_HEAD(l_copy);
     element_t *item = NULL, *tmp = NULL;
 
-    // Copy l_meta.l to l_copy
-    if (l_meta.l && !list_empty(l_meta.l)) {
-        list_for_each_entry (item, l_meta.l, list) {
+    // Copy current->q to l_copy
+    if (current->q && !list_empty(current->q)) {
+        list_for_each_entry (item, current->q, list) {
             size_t slen;
             tmp = malloc(sizeof(element_t));
             if (!tmp)
@@ -508,7 +447,7 @@ static bool do_dedup(int argc, char *argv[])
             list_add_tail(&tmp->list, &l_copy);
         }
         // Return false if the loop does not leave properly
-        if (&item->list != l_meta.l) {
+        if (&item->list != current->q) {
             list_for_each_entry_safe (item, tmp, &l_copy, list) {
                 free(item->value);
                 free(item);
@@ -522,7 +461,7 @@ static bool do_dedup(int argc, char *argv[])
 
     bool ok = true;
     if (exception_setup(true))
-        ok = q_delete_dup(l_meta.l);
+        ok = q_delete_dup(current->q);
     exception_cancel();
 
     if (!ok) {
@@ -534,7 +473,7 @@ static bool do_dedup(int argc, char *argv[])
         return false;
     }
 
-    struct list_head *l_tmp = l_meta.l->next;
+    struct list_head *l_tmp = current->q->next;
     bool is_this_dup = false;
     // Compare between new list and old one
     list_for_each_entry (item, &l_copy, list) {
@@ -545,9 +484,8 @@ static bool do_dedup(int argc, char *argv[])
                    item->value) == 0;
         if (is_this_dup || is_next_dup) {
             // Update list size
-            lcnt--;
-            l_meta.size--;
-        } else if (l_tmp != l_meta.l &&
+            current->size--;
+        } else if (l_tmp != current->q &&
                    strcmp(list_entry(l_tmp, element_t, list)->value,
                           item->value) == 0)
             l_tmp = l_tmp->next;
@@ -556,7 +494,7 @@ static bool do_dedup(int argc, char *argv[])
         is_this_dup = is_next_dup;
     }
     // All elements in new list should be traversed
-    ok = ok && l_tmp == l_meta.l;
+    ok = ok && l_tmp == current->q;
     if (!ok)
         report(1,
                "ERROR: Duplicate strings are in queue or distinct strings are "
@@ -567,7 +505,7 @@ static bool do_dedup(int argc, char *argv[])
         free(item);
     }
 
-    show_queue(3);
+    q_show(3);
     return ok && !error_check();
 }
 
@@ -578,17 +516,17 @@ static bool do_reverse(int argc, char *argv[])
         return false;
     }
 
-    if (!l_meta.l)
+    if (!current || !current->q)
         report(3, "Warning: Calling reverse on null queue");
     error_check();
 
     set_noallocate_mode(true);
-    if (exception_setup(true))
-        q_reverse(l_meta.l);
+    if (current && exception_setup(true))
+        q_reverse(current->q);
     exception_cancel();
 
     set_noallocate_mode(false);
-    show_queue(3);
+    q_show(3);
     return !error_check();
 }
 
@@ -607,36 +545,35 @@ static bool do_size(int argc, char *argv[])
     }
 
     if (argc == 2) {
-        if (!get_int(argv[1], &reps)) {
+        if (!get_int(argv[1], &reps))
             report(1, "Invalid number of calls to size '%s'", argv[2]);
-        }
     }
 
     int cnt = 0;
-    if (!l_meta.l)
+    if (!current || !current->q)
         report(3, "Warning: Calling size on null queue");
     error_check();
 
-    if (exception_setup(true)) {
+    if (current && exception_setup(true)) {
         for (int r = 0; ok && r < reps; r++) {
-            cnt = q_size(l_meta.l);
+            cnt = q_size(current->q);
             ok = ok && !error_check();
         }
     }
     exception_cancel();
 
-    if (ok) {
-        if (lcnt == cnt) {
+    if (current && ok) {
+        if (current->size == cnt) {
             report(2, "Queue size = %d", cnt);
         } else {
             report(1,
                    "ERROR: Computed queue size as %d, but correct value is %d",
-                   cnt, (int) lcnt);
+                   cnt, (int) current->size);
             ok = false;
         }
     }
 
-    show_queue(3);
+    q_show(3);
 
     return ok && !error_check();
 }
@@ -648,31 +585,33 @@ bool do_sort(int argc, char *argv[])
         return false;
     }
 
-    if (!l_meta.l)
+    int cnt = 0;
+    if (!current || !current->q)
         report(3, "Warning: Calling sort on null queue");
+    else
+        cnt = q_size(current->q);
     error_check();
 
-    int cnt = q_size(l_meta.l);
     if (cnt < 2)
         report(3, "Warning: Calling sort on single node");
     error_check();
 
     set_noallocate_mode(true);
-    if (exception_setup(true))
-        q_sort(l_meta.l);
+    if (current && exception_setup(true))
+        q_sort(current->q);
     exception_cancel();
     set_noallocate_mode(false);
 
     bool ok = true;
-    if (l_meta.size) {
-        for (struct list_head *cur_l = l_meta.l->next;
-             cur_l != l_meta.l && --cnt; cur_l = cur_l->next) {
+    if (current && current->size) {
+        for (struct list_head *cur_l = current->q->next;
+             cur_l != current->q && --cnt; cur_l = cur_l->next) {
             /* Ensure each element in ascending order */
             /* FIXME: add an option to specify sorting order */
             element_t *item, *next_item;
             item = list_entry(cur_l, element_t, list);
             next_item = list_entry(cur_l->next, element_t, list);
-            if (strcasecmp(item->value, next_item->value) > 0) {
+            if (strcmp(item->value, next_item->value) > 0) {
                 report(1, "ERROR: Not sorted in ascending order");
                 ok = false;
                 break;
@@ -680,7 +619,7 @@ bool do_sort(int argc, char *argv[])
         }
     }
 
-    show_queue(3);
+    q_show(3);
     return ok && !error_check();
 }
 
@@ -691,17 +630,23 @@ static bool do_dm(int argc, char *argv[])
         return false;
     }
 
-    if (!l_meta.l)
+    if (!current || !current->q) {
         report(3, "Warning: Try to access null queue");
+        return false;
+    }
     error_check();
 
     bool ok = true;
     if (exception_setup(true))
-        ok = q_delete_mid(l_meta.l);
+        ok = q_delete_mid(current->q);
     exception_cancel();
 
-    lcnt--;
-    show_queue(3);
+    if (!current->size)
+        report(3, "Warning: Try to delete middle node to empty queue");
+
+    if (current->size)
+        --current->size;
+    q_show(3);
     return ok && !error_check();
 }
 
@@ -712,32 +657,171 @@ static bool do_swap(int argc, char *argv[])
         return false;
     }
 
-    if (!l_meta.l)
+    if (!current || !current->q) {
         report(3, "Warning: Try to access null queue");
+        return false;
+    }
     error_check();
 
     set_noallocate_mode(true);
     if (exception_setup(true))
-        q_swap(l_meta.l);
+        q_swap(current->q);
     exception_cancel();
 
     set_noallocate_mode(false);
 
-    show_queue(3);
+    q_show(3);
     return !error_check();
+}
+
+static bool do_descend(int argc, char *argv[])
+{
+    if (argc != 1) {
+        report(1, "%s takes too much arguments", argv[0]);
+        return false;
+    }
+
+    if (!current || !current->q) {
+        report(3, "Warning: Calling descend on null queue");
+        return false;
+    }
+    error_check();
+
+
+    int cnt = q_size(current->q);
+    if (!cnt)
+        report(3, "Warning: Calling descend on empty queue");
+    else if (cnt < 2)
+        report(3, "Warning: Calling descend on single node");
+    error_check();
+
+    if (exception_setup(true))
+        current->size = q_descend(current->q);
+    set_noallocate_mode(false);
+
+    bool ok = true;
+
+    cnt = current->size;
+    if (current->size) {
+        for (struct list_head *cur_l = current->q->next;
+             cur_l != current->q && --cnt; cur_l = cur_l->next) {
+            element_t *item, *next_item;
+            item = list_entry(cur_l, element_t, list);
+            next_item = list_entry(cur_l->next, element_t, list);
+            if (strcmp(item->value, next_item->value) < 0) {
+                report(1,
+                       "ERROR: At least one node violated the ordering rule");
+                ok = false;
+                break;
+            }
+        }
+    }
+
+    q_show(3);
+    return ok && !error_check();
+}
+
+static bool do_reverseK(int argc, char *argv[])
+{
+    int k = 0;
+
+    if (!current || !current->q) {
+        report(3, "Warning: Calling reverseK on null queue");
+        return false;
+    }
+    error_check();
+
+    if (argc == 2) {
+        if (!get_int(argv[1], &k)) {
+            report(1, "Invalid number of K");
+            return false;
+        }
+    } else {
+        report(1, "Invalid number of arguments for reverseK");
+        return false;
+    }
+
+    set_noallocate_mode(true);
+    if (exception_setup(true))
+        q_reverseK(current->q, k);
+    exception_cancel();
+
+    set_noallocate_mode(false);
+    q_show(3);
+    return !error_check();
+}
+
+static bool do_merge(int argc, char *argv[])
+{
+    if (argc != 1) {
+        report(1, "%s takes no arguments", argv[0]);
+        return false;
+    }
+
+    if (!current || !current->q) {
+        report(3, "Warning: Calling merge on null queue");
+        return false;
+    }
+    error_check();
+
+    int len = 0;
+    set_noallocate_mode(true);
+    if (current && exception_setup(true))
+        len = q_merge(&chain.head);
+    exception_cancel();
+    set_noallocate_mode(false);
+
+    if (q_size(&chain.head) > 1) {
+        chain.size = 1;
+        current = list_entry(chain.head.next, queue_contex_t, chain);
+        current->size = len;
+
+        struct list_head *cur = chain.head.next->next;
+        while ((uintptr_t) cur != (uintptr_t) &chain.head) {
+            queue_contex_t *ctx = list_entry(cur, queue_contex_t, chain);
+            cur = cur->next;
+            q_free(ctx->q);
+            free(ctx);
+        }
+
+        chain.head.prev = &current->chain;
+        current->chain.next = &chain.head;
+    }
+
+    bool ok = true;
+    if (current && current->size) {
+        for (struct list_head *cur_l = current->q->next;
+             cur_l != current->q && --len; cur_l = cur_l->next) {
+            /* Ensure each element in ascending order */
+            element_t *item, *next_item;
+            item = list_entry(cur_l, element_t, list);
+            next_item = list_entry(cur_l->next, element_t, list);
+            if (strcmp(item->value, next_item->value) > 0) {
+                report(1,
+                       "ERROR: Not sorted in ascending order (It might because "
+                       "of unsorted queues are merged or there're some flaws "
+                       "in 'q_merge')");
+                ok = false;
+                break;
+            }
+        }
+    }
+
+    q_show(3);
+    return ok && !error_check();
 }
 
 static bool is_circular()
 {
-    struct list_head *cur = l_meta.l->next;
-    while (cur != l_meta.l) {
+    struct list_head *cur = current->q->next;
+    while (cur != current->q) {
         if (!cur)
             return false;
         cur = cur->next;
     }
 
-    cur = l_meta.l->prev;
-    while (cur != l_meta.l) {
+    cur = current->q->prev;
+    while (cur != current->q) {
         if (!cur)
             return false;
         cur = cur->prev;
@@ -745,14 +829,14 @@ static bool is_circular()
     return true;
 }
 
-static bool show_queue(int vlevel)
+static bool q_show(int vlevel)
 {
     bool ok = true;
     if (verblevel < vlevel)
         return true;
 
     int cnt = 0;
-    if (!l_meta.l) {
+    if (!current || !current->q) {
         report(vlevel, "l = NULL");
         return true;
     }
@@ -764,14 +848,20 @@ static bool show_queue(int vlevel)
 
     report_noreturn(vlevel, "l = [");
 
-    struct list_head *ori = l_meta.l;
-    struct list_head *cur = l_meta.l->next;
+    struct list_head *ori = current->q;
+    struct list_head *cur = current->q->next;
 
     if (exception_setup(true)) {
-        while (ok && ori != cur && cnt < lcnt) {
+        while (ok && ori != cur && cnt < current->size) {
             element_t *e = list_entry(cur, element_t, list);
-            if (cnt < big_list_size)
+            if (cnt < BIG_LIST_SIZE) {
                 report_noreturn(vlevel, cnt == 0 ? "%s" : " %s", e->value);
+                if (show_entropy) {
+                    report_noreturn(
+                        vlevel, "(%3.2f%%)",
+                        shannon_entropy((const uint8_t *) e->value));
+                }
+            }
             cnt++;
             cur = cur->next;
             ok = ok && !error_check();
@@ -785,13 +875,14 @@ static bool show_queue(int vlevel)
     }
 
     if (cur == ori) {
-        if (cnt <= big_list_size)
+        if (cnt <= BIG_LIST_SIZE)
             report(vlevel, "]");
         else
             report(vlevel, " ... ]");
     } else {
         report(vlevel, " ... ]");
-        report(vlevel, "ERROR:  Queue has more than %d elements", lcnt);
+        report(vlevel, "ERROR:  Queue has more than %d elements",
+               current->size);
         ok = false;
     }
 
@@ -804,42 +895,95 @@ static bool do_show(int argc, char *argv[])
         report(1, "%s takes no arguments", argv[0]);
         return false;
     }
-    return show_queue(0);
+
+    if (current)
+        report(1, "Current queue ID: %d", current->id);
+
+    return q_show(0);
+}
+
+static bool do_prev(int argc, char *argv[])
+{
+    if (argc != 1) {
+        report(1, "%s takes no arguments", argv[0]);
+        return false;
+    }
+
+    if (!current) {
+        report(3, "Warning: Try to operate null queue");
+        return false;
+    }
+
+    struct list_head *prev;
+    if (chain.size > 1) {
+        prev = ((uintptr_t) chain.head.next == (uintptr_t) &current->chain)
+                   ? chain.head.prev
+                   : current->chain.prev;
+        current = prev ? list_entry(prev, queue_contex_t, chain) : NULL;
+    }
+
+    return q_show(0);
+}
+
+static bool do_next(int argc, char *argv[])
+{
+    if (argc != 1) {
+        report(1, "%s takes no arguments", argv[0]);
+        return false;
+    }
+
+    if (!current) {
+        report(3, "Warning: Try to operate null queue");
+        return false;
+    }
+
+    struct list_head *next;
+    if (chain.size > 1) {
+        next = ((uintptr_t) chain.head.prev == (uintptr_t) &current->chain)
+                   ? chain.head.next
+                   : current->chain.next;
+        current = next ? list_entry(next, queue_contex_t, chain) : NULL;
+    }
+
+    return q_show(0);
 }
 
 static void console_init()
 {
-    ADD_COMMAND(new, "                | Create new queue");
-    ADD_COMMAND(free, "                | Delete queue");
-    ADD_COMMAND(
-        ih,
-        " str [n]        | Insert string str at head of queue n times. "
-        "Generate random string(s) if str equals RAND. (default: n == 1)");
-    ADD_COMMAND(
-        it,
-        " str [n]        | Insert string str at tail of queue n times. "
-        "Generate random string(s) if str equals RAND. (default: n == 1)");
+    ADD_COMMAND(new, "Create new queue", "");
+    ADD_COMMAND(free, "Delete queue", "");
+    ADD_COMMAND(prev, "Switch to previous queue", "");
+    ADD_COMMAND(next, "Switch to next queue", "");
+    ADD_COMMAND(ih,
+                "Insert string str at head of queue n times. Generate random "
+                "string(s) if str equals RAND. (default: n == 1)",
+                "str [n]");
+    ADD_COMMAND(it,
+                "Insert string str at tail of queue n times. Generate random "
+                "string(s) if str equals RAND. (default: n == 1)",
+                "str [n]");
     ADD_COMMAND(
         rh,
-        " [str]          | Remove from head of queue.  Optionally compare "
-        "to expected value str");
+        "Remove from head of queue. Optionally compare to expected value str",
+        "[str]");
     ADD_COMMAND(
         rt,
-        " [str]          | Remove from tail of queue.  Optionally compare "
-        "to expected value str");
-    ADD_COMMAND(
-        rhq,
-        "                | Remove from head of queue without reporting value.");
-    ADD_COMMAND(reverse, "                | Reverse queue");
-    ADD_COMMAND(sort, "                | Sort queue in ascending order");
-    ADD_COMMAND(
-        size, " [n]            | Compute queue size n times (default: n == 1)");
-    ADD_COMMAND(show, "                | Show queue contents");
-    ADD_COMMAND(dm, "                | Delete middle node in queue");
-    ADD_COMMAND(
-        dedup, "                | Delete all nodes that have duplicate string");
-    ADD_COMMAND(swap,
-                "                | Swap every two adjacent nodes in queue");
+        "Remove from tail of queue. Optionally compare to expected value str",
+        "[str]");
+    ADD_COMMAND(reverse, "Reverse queue", "");
+    ADD_COMMAND(sort, "Sort queue in ascending order", "");
+    ADD_COMMAND(size, "Compute queue size n times (default: n == 1)", "[n]");
+    ADD_COMMAND(show, "Show queue contents", "");
+    ADD_COMMAND(dm, "Delete middle node in queue", "");
+    ADD_COMMAND(dedup, "Delete all nodes that have duplicate string", "");
+    ADD_COMMAND(merge, "Merge all the queues into one sorted queue", "");
+    ADD_COMMAND(swap, "Swap every two adjacent nodes in queue", "");
+    ADD_COMMAND(descend,
+                "Remove every node which has a node with a strictly greater "
+                "value anywhere to the right side of it",
+                "");
+    ADD_COMMAND(reverseK, "Reverse the nodes of the queue 'K' at a time",
+                "[K]");
     add_param("length", &string_length, "Maximum length of displayed string",
               NULL);
     add_param("malloc", &fail_probability, "Malloc failure probability percent",
@@ -849,38 +993,50 @@ static void console_init()
 }
 
 /* Signal handlers */
-static void sigsegvhandler(int sig)
+static void sigsegv_handler(int sig)
 {
-    report(1,
-           "Segmentation fault occurred.  You dereferenced a NULL or invalid "
-           "pointer");
+    /* Avoid possible non-reentrant signal function be used in signal handler */
+    assert(write(1,
+                 "Segmentation fault occurred.  You dereferenced a NULL or "
+                 "invalid pointer",
+                 73) == 73);
     /* Raising a SIGABRT signal to produce a core dump for debugging. */
     abort();
 }
 
-static void sigalrmhandler(int sig)
+static void sigalrm_handler(int sig)
 {
     trigger_exception(
         "Time limit exceeded.  Either you are in an infinite loop, or your "
         "code is too inefficient");
 }
 
-static void queue_init()
+static void q_init()
 {
     fail_count = 0;
-    l_meta.l = NULL;
-    signal(SIGSEGV, sigsegvhandler);
-    signal(SIGALRM, sigalrmhandler);
+    INIT_LIST_HEAD(&chain.head);
+    signal(SIGSEGV, sigsegv_handler);
+    signal(SIGALRM, sigalrm_handler);
 }
 
-static bool queue_quit(int argc, char *argv[])
+static bool q_quit(int argc, char *argv[])
 {
     report(3, "Freeing queue");
-    if (lcnt > big_list_size)
+    if (current && current->size > BIG_LIST_SIZE)
         set_cautious_mode(false);
 
-    if (exception_setup(true))
-        q_free(l_meta.l);
+    if (exception_setup(true)) {
+        struct list_head *cur = chain.head.next;
+        while (chain.size > 0) {
+            queue_contex_t *qctx, *tmp;
+            tmp = qctx = list_entry(cur, queue_contex_t, chain);
+            cur = cur->next;
+            q_free(qctx->q);
+            free(tmp);
+            chain.size--;
+        }
+    }
+
     exception_cancel();
     set_cautious_mode(true);
 
@@ -936,6 +1092,25 @@ static bool sanity_check()
     return true;
 }
 
+uintptr_t os_random(uintptr_t seed)
+{
+    /* ASLR makes the address random */
+    uintptr_t x = (uintptr_t) &os_random ^ seed;
+#if defined(__APPLE__)
+    x ^= (uintptr_t) mach_absolute_time();
+#else
+    struct timespec time;
+    clock_gettime(CLOCK_MONOTONIC, &time);
+    x ^= (uintptr_t) time.tv_sec;
+    x ^= (uintptr_t) time.tv_nsec;
+#endif
+    /* Do a few randomization steps */
+    uintptr_t max = ((x ^ (x >> 17)) & 0x0F) + 1;
+    for (uintptr_t i = 0; i < max; i++)
+        x = random_shuffle(x);
+    assert(x);
+    return x;
+}
 
 #define BUFSIZE 256
 int main(int argc, char *argv[])
@@ -984,18 +1159,22 @@ int main(int argc, char *argv[])
         }
     }
 
-    srand((unsigned int) (time(NULL)));
-    queue_init();
+    /* A better seed can be obtained by combining getpid() and its parent ID
+     * with the Unix time.
+     */
+    srand(os_random(getpid() ^ getppid()));
+
+    q_init();
     init_cmd();
     console_init();
 
     /* Initialize linenoise only when infile_name not exist */
     if (!infile_name) {
         /* Trigger call back function(auto completion) */
-        linenoiseSetCompletionCallback(completion);
+        line_set_completion_callback(completion);
 
-        linenoiseHistorySetMaxLen(HISTORY_LEN);
-        linenoiseHistoryLoad(HISTORY_FILE); /* Load the history at startup */
+        line_history_set_max_len(HISTORY_LEN);
+        line_history_load(HISTORY_FILE); /* Load the history at startup */
     }
 
     set_verblevel(level);
@@ -1004,7 +1183,7 @@ int main(int argc, char *argv[])
     if (logfile_name)
         set_logfile(logfile_name);
 
-    add_quit_helper(queue_quit);
+    add_quit_helper(q_quit);
 
     bool ok = true;
     ok = ok && run_console(infile_name);
