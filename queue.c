@@ -238,6 +238,12 @@ void q_reverse(struct list_head *head)
     head->prev = tmp;
 }
 
+/* Reverse the nodes of the list k at a time */
+void q_reverseK(struct list_head *head, int k)
+{
+    // https://leetcode.com/problems/reverse-nodes-in-k-group/
+}
+
 struct list_head *merge_two_modified_lists(struct list_head *head1,
                                            struct list_head *head2)
 {
@@ -296,43 +302,6 @@ struct list_head *sort_recur(struct list_head *head)
     return merge_two_modified_lists(left, right);
 }
 
-/* Reverse the nodes of the list k at a time */
-void q_reverseK(struct list_head *head, int k)
-{
-    // https://leetcode.com/problems/reverse-nodes-in-k-group/
-}
-
-struct list_head *merge_two_lists(struct list_head *head,
-                                  struct list_head *merged_head)
-{
-    struct list_head *node1 = head->next, *node2 = merged_head->next;
-    struct list_head **indirect_node = NULL;
-    struct list_head *prev_node = head;
-
-    while (node1 != head && node2 != merged_head) {
-        element_t *element1 = list_entry(node1, element_t, list);
-        element_t *element2 = list_entry(node2, element_t, list);
-        indirect_node =
-            strcmp(element1->value, element2->value) <= 0 ? &node1 : &node2;
-        (*indirect_node)->prev = prev_node;
-        prev_node->next = *indirect_node;
-        prev_node = *indirect_node;
-        *indirect_node = (*indirect_node)->next;
-    }
-
-    indirect_node = node1 == head ? &node2 : &node1;
-    (*indirect_node)->prev = prev_node;
-    prev_node->next = (*indirect_node);
-    if (node1 == head) {
-        merged_head->prev->next = head;
-        head->prev = merged_head->prev;
-    }
-    merged_head->next = merged_head;
-    merged_head->prev = merged_head;
-
-    return head;
-}
-
 /* Sort elements of queue in ascending/descending order */
 void q_sort(struct list_head *head, bool descend)
 {
@@ -368,6 +337,37 @@ int q_descend(struct list_head *head)
 {
     // https://leetcode.com/problems/remove-nodes-from-linked-list/
     return 0;
+}
+
+struct list_head *merge_two_lists(struct list_head *head,
+                                  struct list_head *merged_head)
+{
+    struct list_head *node1 = head->next, *node2 = merged_head->next;
+    struct list_head **indirect_node = NULL;
+    struct list_head *prev_node = head;
+
+    while (node1 != head && node2 != merged_head) {
+        element_t *element1 = list_entry(node1, element_t, list);
+        element_t *element2 = list_entry(node2, element_t, list);
+        indirect_node =
+            strcmp(element1->value, element2->value) <= 0 ? &node1 : &node2;
+        (*indirect_node)->prev = prev_node;
+        prev_node->next = *indirect_node;
+        prev_node = *indirect_node;
+        *indirect_node = (*indirect_node)->next;
+    }
+
+    indirect_node = node1 == head ? &node2 : &node1;
+    (*indirect_node)->prev = prev_node;
+    prev_node->next = (*indirect_node);
+    if (node1 == head) {
+        merged_head->prev->next = head;
+        head->prev = merged_head->prev;
+    }
+    merged_head->next = merged_head;
+    merged_head->prev = merged_head;
+
+    return head;
 }
 
 /* Merge all the queues into one sorted queue, which is in ascending/descending
