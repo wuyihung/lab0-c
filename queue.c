@@ -335,7 +335,27 @@ int q_ascend(struct list_head *head)
  * the right side of it */
 int q_descend(struct list_head *head)
 {
-    // https://leetcode.com/problems/remove-nodes-from-linked-list/
+    struct list_head *node = head->next;
+
+    while (node->next != head) {
+        element_t *element = list_entry(node, element_t, list);
+        struct list_head *next_node = node->next;
+        struct list_head *node_to_the_right = next_node;
+        while (node_to_the_right != head) {
+            element_t *element_to_the_right =
+                list_entry(node_to_the_right, element_t, list);
+            if (strcmp(element_to_the_right->value, element->value) > 0) {
+                node->prev->next = next_node;
+                next_node->prev = node->prev;
+                free(element->value);
+                free(element);
+                break;
+            }
+            node_to_the_right = node_to_the_right->next;
+        }
+        node = next_node;
+    }
+
     return 0;
 }
 
