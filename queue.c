@@ -238,6 +238,38 @@ void q_reverse(struct list_head *head)
     head->prev = tmp;
 }
 
+/* Reverse the nodes of the list k at a time */
+void q_reverseK(struct list_head *head, int k)
+{
+    int size = q_size(head);
+    int iteration = size / k;
+
+    struct list_head *start_node = head;
+    for (int i = 0; i < iteration; ++i) {
+        struct list_head *node = start_node->next;
+        struct list_head *end_node;
+        /* Modiy prev pointers */
+        for (int j = 0; j < k - 1; ++j) {
+            node->prev = node->next;
+            node = node->next;
+        }
+        node->prev = start_node;
+        end_node = node->next;
+        end_node->prev = start_node->next;
+        /* Modify next pointers */
+        node = end_node->prev;
+        node->next = end_node;
+        for (int j = 0; j < k - 1; ++j) {
+            struct list_head *tmp = node;
+            node = node->prev;
+            node->next = tmp;
+        }
+        start_node->next = node;
+        /* Reset start_node */
+        start_node = end_node->prev;
+    }
+}
+
 static struct list_head *merge(struct list_head *a, struct list_head *b)
 {
     struct list_head *head = NULL, **tail = &head;
@@ -305,12 +337,6 @@ static void merge_final(struct list_head *head,
     head->prev = tail;
 }
 
-/* Reverse the nodes of the list k at a time */
-void q_reverseK(struct list_head *head, int k)
-{
-    // https://leetcode.com/problems/reverse-nodes-in-k-group/
-}
-
 /* Sort elements of queue in ascending/descending order */
 void q_sort(struct list_head *head, bool descend)
 {
@@ -371,14 +397,74 @@ int q_ascend(struct list_head *head)
  * the right side of it */
 int q_descend(struct list_head *head)
 {
-    // https://leetcode.com/problems/remove-nodes-from-linked-list/
+    struct list_head *node = head->next;
+
+    while (node->next != head) {
+        element_t *element = list_entry(node, element_t, list);
+        struct list_head *next_node = node->next;
+        struct list_head *node_to_the_right = next_node;
+        while (node_to_the_right != head) {
+            element_t *element_to_the_right =
+                list_entry(node_to_the_right, element_t, list);
+            if (strcmp(element_to_the_right->value, element->value) > 0) {
+                node->prev->next = next_node;
+                next_node->prev = node->prev;
+                free(element->value);
+                free(element);
+                break;
+            }
+            node_to_the_right = node_to_the_right->next;
+        }
+        node = next_node;
+    }
+
     return 0;
+}
+
+struct list_head *merge_two_lists(struct list_head *head,
+                                  struct list_head *merged_head)
+{
+    struct list_head *node1 = head->next, *node2 = merged_head->next;
+    struct list_head **indirect_node = NULL;
+    struct list_head *prev_node = head;
+
+    while (node1 != head && node2 != merged_head) {
+        element_t *element1 = list_entry(node1, element_t, list);
+        element_t *element2 = list_entry(node2, element_t, list);
+        indirect_node =
+            strcmp(element1->value, element2->value) <= 0 ? &node1 : &node2;
+        (*indirect_node)->prev = prev_node;
+        prev_node->next = *indirect_node;
+        prev_node = *indirect_node;
+        *indirect_node = (*indirect_node)->next;
+    }
+
+    indirect_node = node1 == head ? &node2 : &node1;
+    (*indirect_node)->prev = prev_node;
+    prev_node->next = (*indirect_node);
+    if (node1 == head) {
+        merged_head->prev->next = head;
+        head->prev = merged_head->prev;
+    }
+    merged_head->next = merged_head;
+    merged_head->prev = merged_head;
+
+    return head;
 }
 
 /* Merge all the queues into one sorted queue, which is in ascending/descending
  * order */
 int q_merge(struct list_head *head, bool descend)
 {
-    // https://leetcode.com/problems/merge-k-sorted-lists/
-    return 0;
+    struct list_head *first_node = head->next;
+    struct list_head *node = first_node->next;
+    queue_contex_t *first_ctx = list_entry(first_node, queue_contex_t, chain);
+
+    while (node != head) {
+        queue_contex_t *node_ctx = list_entry(node, queue_contex_t, chain);
+        first_ctx->q = merge_two_lists(first_ctx->q, node_ctx->q);
+        node = node->next;
+    }
+
+    return q_size(first_ctx->q);
 }
