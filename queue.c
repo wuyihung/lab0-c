@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "queue.h"
+#include "time.h"
 
 /* Notice: sometimes, Cppcheck would find the potential NULL pointer bugs,
  * but some of them cannot occur. You can suppress them by adding the
@@ -431,4 +432,50 @@ int q_merge(struct list_head *head, bool descend)
     }
 
     return q_size(first_ctx->q);
+}
+
+void q_shuffle(struct list_head *head)
+{
+    if (head == NULL)
+        return;
+
+    int size = q_size(head);
+
+    srand(time(NULL));
+
+    for (int i = 0; i < size - 1; ++i) {
+        int j = i + rand() % (size - i);
+
+        struct list_head *node_i = head->next, *prev_i = NULL, *next_i = NULL;
+        int k = 0;
+        for (; k < i; ++k) {
+            node_i = node_i->next;
+        }
+        prev_i = node_i->prev;
+        next_i = node_i->next;
+
+        struct list_head *node_j = node_i, *prev_j = NULL, *next_j = NULL;
+        for (; k < j; ++k) {
+            node_j = node_j->next;
+        }
+        prev_j = node_j->prev;
+        next_j = node_j->next;
+
+        if (next_i == node_j) {
+            next_i = node_i;
+            prev_j = node_j;
+        }
+
+        if (node_i != node_j) {
+            prev_i->next = node_j;
+            node_j->prev = prev_i;
+            node_j->next = next_i;
+            next_i->prev = node_j;
+
+            prev_j->next = node_i;
+            node_i->prev = prev_j;
+            node_i->next = next_j;
+            next_j->prev = node_i;
+        }
+    }
 }
