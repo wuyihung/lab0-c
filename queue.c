@@ -441,7 +441,11 @@ void q_shuffle(struct list_head *head)
 
     int size = q_size(head);
 
-    srand(time(NULL));
+    struct timespec ts;
+    timespec_get(&ts, TIME_UTC);
+    long long nanoseconds = ts.tv_sec * 1000000000LL + ts.tv_nsec;
+
+    srand(nanoseconds);
 
     for (int i = 0; i < size - 1; ++i) {
         int j = i + rand() % (size - i);
