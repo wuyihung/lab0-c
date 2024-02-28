@@ -90,6 +90,8 @@ static ssize_t getrandom(void *buf, size_t buflen, unsigned int flags)
 }
 #endif
 
+uint32_t xorshift32_state = 123456789;
+
 static int randombytes_linux_randombytes_getrandom(void *buf, size_t n)
 {
     size_t offset = 0;
@@ -292,4 +294,21 @@ int randombytes(uint8_t *buf, size_t n)
 #else
 #error "randombytes(...) is not supported on this platform"
 #endif
+}
+
+static uint32_t xorshift32()
+{
+    uint32_t x = xorshift32_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    xorshift32_state = x;
+    return x;
+}
+
+char get_xorshift_random_character()
+{
+    uint32_t randomValue = xorshift32();
+    int letterIndex = randomValue % 26;
+    return 'a' + letterIndex;
 }

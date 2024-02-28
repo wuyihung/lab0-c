@@ -26,6 +26,7 @@
 /* Shannon entropy */
 extern double shannon_entropy(const uint8_t *input_data);
 extern int show_entropy;
+extern int enable_xorshift;
 
 /* Our program needs to use regular malloc/free */
 #define INTERNAL 1
@@ -172,9 +173,15 @@ static void fill_rand_string(char *buf, size_t buf_size)
     while (len < MIN_RANDSTR_LEN)
         len = rand() % buf_size;
 
-    randombytes((uint8_t *) buf, len);
-    for (size_t n = 0; n < len; n++)
-        buf[n] = charset[buf[n] % (sizeof(charset) - 1)];
+    if (enable_xorshift) {
+        for (size_t i = 0; i < len; ++i) {
+            buf[i] = get_xorshift_random_character();
+        }
+    } else {
+        randombytes((uint8_t *) buf, len);
+        for (size_t n = 0; n < len; n++)
+            buf[n] = charset[buf[n] % (sizeof(charset) - 1)];
+    }
     buf[len] = '\0';
 }
 
