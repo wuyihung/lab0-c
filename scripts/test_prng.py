@@ -1,5 +1,6 @@
 import subprocess
 import tempfile
+import sys
 
 
 def extract_and_concatenate_strings(input_text):
@@ -39,19 +40,28 @@ BIG_LIST_SIZE = 30
 
 # 測試 RAND 次數
 test_count = 150000
-input = "new\n"
-for i in range(int(test_count / BIG_LIST_SIZE)):
-    input += "ih RAND " + str(BIG_LIST_SIZE) + "\n"
-modulo = test_count % BIG_LIST_SIZE
-input += "ih RAND " + str(modulo) + "\n"
-input += "free\nquit\n"
 
-# 取得 stdout 的 RAND 結果
-command = './qtest -v 3'
-clist = command.split()
-completedProcess = subprocess.run(
-    clist, capture_output=True, text=True, input=input)
-s = completedProcess.stdout
 
-s_extracted = extract_and_concatenate_strings(s)
-test_string_randomness(s_extracted)
+def main():
+    input = "option xorshift " + str(enable_xorshift) + "\n"
+    input += "new\n"
+    for i in range(int(test_count / BIG_LIST_SIZE)):
+        input += "ih RAND " + str(BIG_LIST_SIZE) + "\n"
+    modulo = test_count % BIG_LIST_SIZE
+    input += "ih RAND " + str(modulo) + "\n"
+    input += "free\nquit\n"
+
+    # 取得 stdout 的 RAND 結果
+    command = './qtest -v 3'
+    clist = command.split()
+    completedProcess = subprocess.run(
+        clist, capture_output=True, text=True, input=input)
+    s = completedProcess.stdout
+
+    s_extracted = extract_and_concatenate_strings(s)
+    test_string_randomness(s_extracted)
+
+
+if __name__ == "__main__":
+    enable_xorshift = sys.argv[1]
+    main()
