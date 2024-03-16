@@ -11,6 +11,8 @@
  *   cppcheck-suppress nullPointer
  */
 
+#define MAX_STR_LEN 64
+
 #ifndef strlcpy
 #define strlcpy(dst, src, sz) snprintf((dst), (sz), "%s", (src))
 #endif
@@ -57,12 +59,12 @@ bool q_insert_head(struct list_head *head, char *s)
         return false;
     }
     if (s) {
-        inserted_element->value = (char *) malloc(strlen(s) + 1);
+        inserted_element->value = (char *) malloc(MAX_STR_LEN);
         if (!inserted_element->value) {
             free(inserted_element);
             return false;
         }
-        strlcpy(inserted_element->value, s, strlen(s) + 1);
+        strlcpy(inserted_element->value, s, MAX_STR_LEN);
     }
     struct list_head *next = head->next;
     inserted_element->list.next = next;
@@ -83,12 +85,12 @@ bool q_insert_tail(struct list_head *head, char *s)
         return false;
     }
     if (s) {
-        inserted_element->value = (char *) malloc(strlen(s) + 1);
+        inserted_element->value = (char *) malloc(MAX_STR_LEN);
         if (!inserted_element->value) {
             free(inserted_element);
             return false;
         }
-        strlcpy(inserted_element->value, s, strlen(s) + 1);
+        strlcpy(inserted_element->value, s, MAX_STR_LEN);
     }
     struct list_head *prev = head->prev;
     inserted_element->list.next = head;
