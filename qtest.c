@@ -178,9 +178,12 @@ static void fill_rand_string(char *buf, size_t buf_size)
             buf[i] = get_xorshift_random_character();
         }
     } else {
-        randombytes((uint8_t *) buf, len);
-        for (size_t n = 0; n < len; n++)
-            buf[n] = charset[buf[n] % (sizeof(charset) - 1)];
+        uint64_t *randstr_buf_64 = malloc(len * sizeof(uint64_t));
+        randombytes((uint8_t *) randstr_buf_64, len * sizeof(uint64_t));
+        for (size_t n = 0; n < len; n++) {
+            buf[n] = charset[randstr_buf_64[n] % (sizeof(charset) - 1)];
+        }
+        free(randstr_buf_64);
     }
     buf[len] = '\0';
 }
