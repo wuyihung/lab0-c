@@ -80,6 +80,7 @@ static int partial_randomness = 0;
 
 #define MIN_RANDSTR_LEN 5
 #define MAX_RANDSTR_LEN 10
+#define SORTED_LEN_FOR_PARTIAL_RANDOMNESS 10
 static const char charset[] = "abcdefghijklmnopqrstuvwxyz";
 /* For queue_insert and queue_remove */
 typedef enum {
@@ -189,6 +190,47 @@ static void fill_rand_string(char *buf, size_t buf_size)
     buf[len] = '\0';
 }
 
+static bool insert_element(position_t pos, char *inserts, int r)
+{
+    bool result = true;
+    char *lasts = NULL;
+    bool rval = pos == POS_TAIL ? q_insert_tail(current->q, inserts)
+                                : q_insert_head(current->q, inserts);
+    if (rval) {
+        current->size++;
+        element_t *entry = pos == POS_TAIL
+                               ? list_last_entry(current->q, element_t, list)
+                               : list_first_entry(current->q, element_t, list);
+        char *cur_inserts = entry->value;
+        if (!cur_inserts) {
+            report(1, "ERROR: Failed to save copy of string in queue");
+            result = false;
+        } else if (r == 0 && inserts == cur_inserts) {
+            report(1,
+                   "ERROR: Need to allocate and copy string for new "
+                   "queue element");
+            result = false;
+        } else if (r == 1 && lasts == cur_inserts) {
+            report(1,
+                   "ERROR: Need to allocate separate string for each "
+                   "queue element");
+            result = false;
+        }
+        lasts = cur_inserts;
+    } else {
+        fail_count++;
+        if (fail_count < fail_limit)
+            report(2, "Insertion of %s failed", inserts);
+        else {
+            report(1, "ERROR: Insertion of %s failed (%d failures total)",
+                   inserts, fail_count);
+            result = false;
+        }
+    }
+
+    return result;
+}
+
 /* insertion */
 static bool queue_insert(position_t pos, int argc, char *argv[])
 {
@@ -208,7 +250,6 @@ static bool queue_insert(position_t pos, int argc, char *argv[])
         return ok;
     }
 
-    char *lasts = NULL;
     char randstr_buf[MAX_RANDSTR_LEN];
     int reps = 1;
     bool ok = true, need_rand = false;
@@ -235,47 +276,25 @@ static bool queue_insert(position_t pos, int argc, char *argv[])
                pos == POS_TAIL ? "tail" : "head");
     error_check();
 
-    if (current && exception_setup(true)) {
+    if (current) {
         for (int r = 0; ok && r < reps; r++) {
-            if (need_rand)
+            if (need_rand) {
                 fill_rand_string(randstr_buf, sizeof(randstr_buf));
-            bool rval = pos == POS_TAIL ? q_insert_tail(current->q, inserts)
-                                        : q_insert_head(current->q, inserts);
-            if (rval) {
-                current->size++;
-                element_t *entry =
-                    pos == POS_TAIL
-                        ? list_last_entry(current->q, element_t, list)
-                        : list_first_entry(current->q, element_t, list);
-                char *cur_inserts = entry->value;
-                if (!cur_inserts) {
-                    report(1, "ERROR: Failed to save copy of string in queue");
-                    ok = false;
-                } else if (r == 0 && inserts == cur_inserts) {
-                    report(1,
-                           "ERROR: Need to allocate and copy string for new "
-                           "queue element");
-                    ok = false;
-                    break;
-                } else if (r == 1 && lasts == cur_inserts) {
-                    report(1,
-                           "ERROR: Need to allocate separate string for each "
-                           "queue element");
-                    ok = false;
-                    break;
-                }
-                lasts = cur_inserts;
-            } else {
-                fail_count++;
-                if (fail_count < fail_limit)
-                    report(2, "Insertion of %s failed", inserts);
-                else {
-                    report(1,
-                           "ERROR: Insertion of %s failed (%d failures total)",
-                           inserts, fail_count);
-                    ok = false;
-                }
-            }
+
+                if (partial_randomness) {
+                    ok = insert_element(pos, inserts, r);
+
+                    for (;
+                         ok &&
+                         (0 != ((r + 1) % SORTED_LEN_FOR_PARTIAL_RANDOMNESS)) &&
+                         (r + 1 < reps);
+                         ++r)
+                        ok = insert_element(pos, inserts, r + 1);
+                } else
+                    ok = insert_element(pos, inserts, r);
+            } else
+                ok = insert_element(pos, inserts, r);
+
             ok = ok && !error_check();
         }
     }
