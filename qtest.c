@@ -76,6 +76,8 @@ static int string_length = MAXSTRING;
 
 static int descend = 0;
 
+static int partial_randomness = 0;
+
 #define MIN_RANDSTR_LEN 5
 #define MAX_RANDSTR_LEN 10
 static const char charset[] = "abcdefghijklmnopqrstuvwxyz";
@@ -1098,6 +1100,8 @@ static void console_init()
               "Number of times allow queue operations to return false", NULL);
     add_param("descend", &descend,
               "Sort and merge queue in ascending/descending order", NULL);
+    add_param("partial_randomness", &partial_randomness,
+              "Partial or total randomness", NULL);
 }
 
 /* Signal handlers */
