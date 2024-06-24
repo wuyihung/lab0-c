@@ -4,6 +4,7 @@
 
 #include "queue.h"
 #include "time.h"
+#include "timsort.h"
 
 /* Notice: sometimes, Cppcheck would find the potential NULL pointer bugs,
  * but some of them cannot occur. You can suppress them by adding the
@@ -484,4 +485,34 @@ void q_shuffle(struct list_head *head)
             next_j->prev = node_i;
         }
     }
+}
+
+static int compare(void *priv,
+                   const struct list_head *a,
+                   const struct list_head *b)
+{
+    if (!a || !b)
+        return -1;
+
+    if (a == b)
+        return 0;
+
+    int res = strcmp(list_entry(a, element_t, list)->value,
+                     list_entry(b, element_t, list)->value);
+
+    if (priv)
+        *((int *) priv) += 1;
+
+    return res;
+}
+
+/* Timsort elements of queue in ascending/descending order */
+void q_timsort(struct list_head *head, bool descend)
+{
+    int count = 0;
+
+    if (!head || list_empty(head))
+        return;
+
+    timsort(&count, head, compare);
 }

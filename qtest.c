@@ -629,8 +629,12 @@ bool do_sort(int argc, char *argv[])
     error_check();
 
     set_noallocate_mode(true);
-    if (current && exception_setup(true))
-        q_sort(current->q, descend);
+    if (current && exception_setup(true)) {
+        if (enable_timsort)
+            q_timsort(current->q, descend);
+        else
+            q_sort(current->q, descend);
+    }
     exception_cancel();
     set_noallocate_mode(false);
 

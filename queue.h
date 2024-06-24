@@ -251,5 +251,14 @@ int q_descend(struct list_head *head);
 int q_merge(struct list_head *head, bool descend);
 
 void q_shuffle(struct list_head *head);
+/**
+ * q_timsort() - Timsort elements of queue in ascending/descending order
+ * @head: header of queue
+ * @descend: whether or not to sort in descending order
+ *
+ * No effect if queue is NULL or empty. If there has only one element, do
+ * nothing.
+ */
+void q_timsort(struct list_head *head, bool descend);
 
 #endif /* LAB0_QUEUE_H */
