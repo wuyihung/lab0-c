@@ -77,6 +77,7 @@ static int string_length = MAXSTRING;
 static int descend = 0;
 
 static int partial_randomness = 0;
+static int enable_timsort = 0;
 
 #define MIN_RANDSTR_LEN 5
 #define MAX_RANDSTR_LEN 10
@@ -1121,6 +1122,8 @@ static void console_init()
               "Sort and merge queue in ascending/descending order", NULL);
     add_param("partial_randomness", &partial_randomness,
               "Partial or total randomness", NULL);
+    add_param("enable_timsort", &enable_timsort, "Enable Timsort algorithm",
+              NULL);
 }
 
 /* Signal handlers */
